@@ -296,10 +296,26 @@ type LogoContext = {
 }
 
 function build(shape: LogoShape): LogoContext {
-  const LEFT = shape.left[0]?.length ?? 0
-  const FULL = shape.left.map((line, i) => line + " ".repeat(GAP) + shape.right[i])
+  // Normalize incoming ASCII shape without modifying the source file:
+  // - remove any leading marker '!' used in the art file
+  // - pad left/right arrays to the same number of lines
+  // - pad each line to the maximum width on its side
+  const normalizeLine = (l: string) => (l?.startsWith("!") ? (l[1] === " " ? l.slice(2) : l.slice(1)) : l ?? "")
+
+  const leftRaw = (shape.left ?? []).map(normalizeLine)
+  const rightRaw = (shape.right ?? []).map(normalizeLine)
+
+  const maxLines = Math.max(leftRaw.length, rightRaw.length)
+  const maxLeftWidth = Math.max(0, ...leftRaw.map((s) => s.length))
+  const maxRightWidth = Math.max(0, ...rightRaw.map((s) => s.length))
+
+  const left = Array.from({ length: maxLines }, (_, i) => (leftRaw[i] ?? "").padEnd(maxLeftWidth, " "))
+  const right = Array.from({ length: maxLines }, (_, i) => (rightRaw[i] ?? "").padEnd(maxRightWidth, " "))
+
+  const LEFT = maxLeftWidth
+  const FULL = left.map((line, i) => line + " ".repeat(GAP) + (right[i] ?? ""))
   const SPAN = Math.hypot(FULL[0]?.length ?? 0, FULL.length * 2) * 0.94
-  return { LEFT, FULL, SPAN, MAP: mapGlyphs(FULL), shape }
+  return { LEFT, FULL, SPAN, MAP: mapGlyphs(FULL), shape: { left, right } }
 }
 
 const DEFAULT = build(logo)

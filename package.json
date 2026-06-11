@@ -19,7 +19,9 @@
     "prepare": "husky",
     "random": "echo 'Random script'",
     "sso": "aws sso login --sso-session=opencode --no-browser",
-    "test": "echo 'do not run tests from root' && exit 1"
+    "test": "echo 'do not run tests from root' && exit 1",
+    "scan:farmbreak": "node scripts/farm-break-scan.js",
+    "scan:agent": "bun run scripts/farm-break-scan-agent.ts"
   },
   "workspaces": {
     "packages": [

@@ -14,6 +14,8 @@ import { InstanceState } from "@/effect/instance-state"
 import { trimDiff } from "./edit"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import * as Bom from "@/util/bom"
+import { Plugin } from "@/plugin"
+import { logScanResult } from "@/scanners/log"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -31,6 +33,7 @@ export const WriteTool = Tool.define(
     const fs = yield* FSUtil.Service
     const events = yield* EventV2Bridge.Service
     const format = yield* Format.Service
+    const plugin = yield* Plugin.Service
 
     return {
       description: DESCRIPTION,
@@ -51,6 +54,103 @@ export const WriteTool = Tool.define(
           const contentNew = next.text
 
           const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, contentNew))
+          
+          // Run prewrite scanners
+          console.log("🔍 [SCAN] Running pre-write security scans...")
+          console.log("🔍 [SCAN] Checking for: secrets, licenses, vulnerabilities")
+          const scanStartTime = Date.now()
+          const scanOutput: { prewriteScan?: { status: string; findings: any[] } } = {}
+          yield* plugin.trigger("prewrite_scan", { diff, user: ctx.user, workspace: instance.directory }, scanOutput)
+          const scanResult = scanOutput.prewriteScan
+          const scanDuration = Date.now() - scanStartTime
+          console.log(`✓ [SCAN] Security scan completed in ${scanDuration}ms`)
+
+          // Handle scan results and log
+          if (scanResult && scanResult.status !== "pass") {
+            console.log(`⚠️  [SCAN] Status: ${scanResult.status.toUpperCase()} - Found ${scanResult.findings.length} issue(s)`)
+            const scanFindings = scanResult.findings.map((f: any) => 
+              `  [${f.scanner}] ${f.path}:${f.line} - ${f.reason}${f.match ? ` (${f.match})` : ""}`
+            ).join("\n")
+            console.log("📋 [SCAN] Findings:\n" + scanFindings)
+            
+            if (scanResult.status === "fail") {
+              console.log("🛑 [SCAN] BLOCKED - Critical security issues detected")
+              // Log blocked write
+              logScanResult({
+                timestamp: new Date().toISOString(),
+                filepath,
+                user: ctx.user,
+                workspace: instance.directory,
+                scanResult,
+                action: "blocked",
+              })
+              
+              // Block the write on scan failure
+              yield* ctx.ask({
+                permission: "scan_override",
+                patterns: [path.relative(instance.worktree, filepath)],
+                always: [],
+                metadata: {
+                  filepath,
+                  diff,
+                  scanResult,
+                  scanFindings,
+                  blocked: true,
+                },
+              })
+              
+              // Log override if user proceeded
+              logScanResult({
+                timestamp: new Date().toISOString(),
+                filepath,
+                user: ctx.user,
+                workspace: instance.directory,
+                scanResult,
+                action: "overridden",
+                overrideReason: "User manually overrode blocked scan",
+              })
+              console.log("✓ [SCAN] User overrode blocked scan - continuing with write")
+            } else if (scanResult.status === "warn") {
+              console.log("⚠️  [SCAN] WARNING - Potential security issues detected")
+              // Request override for warnings
+              yield* ctx.ask({
+                permission: "scan_override",
+                patterns: [path.relative(instance.worktree, filepath)],
+                always: [],
+                metadata: {
+                  filepath,
+                  diff,
+                  scanResult,
+                  scanFindings,
+                  blocked: false,
+                },
+              })
+              
+              // Log warning override
+              logScanResult({
+                timestamp: new Date().toISOString(),
+                filepath,
+                user: ctx.user,
+                workspace: instance.directory,
+                scanResult,
+                action: "overridden",
+                overrideReason: "User overrode warnings",
+              })
+              console.log("✓ [SCAN] User overrode warnings - continuing with write")
+            }
+          } else if (scanResult) {
+            console.log("✅ [SCAN] PASSED - No security issues detected")
+            // Log successful scan
+            logScanResult({
+              timestamp: new Date().toISOString(),
+              filepath,
+              user: ctx.user,
+              workspace: instance.directory,
+              scanResult,
+              action: "passed",
+            })
+          }
+
           yield* ctx.ask({
             permission: "edit",
             patterns: [path.relative(instance.worktree, filepath)],
@@ -72,6 +172,16 @@ export const WriteTool = Tool.define(
           })
 
           let output = "Wrote file successfully."
+          
+          // Add scan summary to output
+          if (scanResult) {
+            output += `\n\n🔍 Security Scan: ${scanResult.status.toUpperCase()}`
+            if (scanResult.findings.length > 0) {
+              output += ` (${scanResult.findings.length} finding(s))`
+            }
+            output += ` - completed in ${scanDuration}ms`
+          }
+          
           yield* lsp.touchFile(filepath, "document")
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilepath = FSUtil.normalizePath(filepath)

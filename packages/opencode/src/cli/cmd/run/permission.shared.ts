@@ -116,6 +116,46 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
     }
   }
 
+  if (request.permission === "scan_override") {
+    const meta = dict(request.metadata)
+    const scanResult = dict(meta.scanResult)
+    const scanFindings = text(meta.scanFindings)
+    const blocked = meta.blocked === true
+    const status = text(scanResult.status)
+    
+    const lines: string[] = []
+    
+    if (blocked) {
+      lines.push("❌ SECURITY SCAN FAILED - Write operation blocked")
+    } else {
+      lines.push("⚠️  Security scan found warnings:")
+    }
+    
+    lines.push("")
+    
+    if (scanFindings) {
+      lines.push(...scanFindings.split("\n"))
+    }
+    
+    lines.push("")
+    
+    if (blocked) {
+      lines.push("This write contains critical security issues and cannot proceed.")
+      lines.push("Please fix the issues before attempting to write.")
+    } else {
+      lines.push("Review the warnings above carefully.")
+      lines.push("Override only if you understand and accept the risks.")
+    }
+
+    return {
+      icon: blocked ? "🛑" : "⚠",
+      title: blocked ? "Security Scan Failed" : "Security Scan Warning",
+      lines,
+      diff: text(meta.diff),
+      file: text(meta.filepath),
+    }
+  }
+
   return {
     icon: "⚙",
     title: `Call tool ${request.permission}`,

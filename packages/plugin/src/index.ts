@@ -332,4 +332,11 @@ export interface Hooks {
    * Modify tool definitions (description and parameters) sent to LLM
    */
   "tool.definition"?: (input: { toolID: string }, output: { description: string; parameters: any }) => Promise<void>
+  /**
+   * Pre-write scan hook to check diffs for secrets, licenses, and vulnerabilities
+   */
+  "prewrite_scan"?: (
+    input: { diff?: string; originalFiles?: any; proposedFiles?: any; user?: any; workspace?: string },
+    output: { prewriteScan?: { status: string; findings: any[] } },
+  ) => Promise<void>
 }

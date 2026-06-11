@@ -1,0 +1,10 @@
+{
+  "entropyThreshold": 4.2,
+  "secretRegexes": {
+    "private_key": "-----BEGIN [A-Z ]+ PRIVATE KEY-----",
+    "aws_access": "AKIA[0-9A-Z]{16}",
+    "jwt": "\\b[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\b"
+  },
+  "approvedLibraries": ["lodash", "axios"],
+  "bannedApis": ["eval", "new Function"]
+}

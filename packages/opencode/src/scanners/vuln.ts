@@ -22,7 +22,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
 
   if (!diff) return { status: "pass", findings: [] }
 
-  console.log("    • [VULN] Scanning for vulnerabilities...")
   const lines = diff.split(/\r?\n/)
   let currentPath: string | undefined
 
@@ -110,7 +109,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
       f.reason.includes("Dangerous API") ||
       f.reason.includes("path traversal"),
   )
-  console.log(`    • [VULN] Found ${findings.length} vulnerability/vulnerabilities`)
   if (hasHighSeverity) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }

@@ -39,7 +39,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
 
   if (!diff) return { status: "pass", findings: [] }
 
-  console.log("    • [SECRET] Scanning for hardcoded secrets...")
   const lines = diff.split(/\r?\n/)
   let currentPath: string | undefined
   for (let i = 0; i < lines.length; i++) {
@@ -76,7 +75,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
   }
 
   const hasFail = findings.some((f) => f.reason.toLowerCase().includes("private key"))
-  console.log(`    • [SECRET] Found ${findings.length} potential secret(s)`)
   if (hasFail) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }

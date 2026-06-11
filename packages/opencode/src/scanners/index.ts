@@ -16,15 +16,8 @@ export type ScanResult = {
 }
 
 export async function runScanners(diff: string, ctx: { user?: any; workspace?: string }): Promise<ScanResult> {
-  console.log("  → [SCAN] Running secret scanner...")
-  console.log("  → [SCAN] Running license scanner...")
-  console.log("  → [SCAN] Running vulnerability scanner...")
-  
   const results = await Promise.all([secretScan(diff, ctx), licenseScan(diff, ctx), vulnScan(diff, ctx)])
-  
   const findings = results.flatMap((r) => r.findings)
-  console.log(`  ✓ [SCAN] Scans complete: ${findings.length} total findings`)
-  
   const worst = results.reduce((acc, r) => {
     if (r.status === "fail") return "fail"
     if (r.status === "warn" && acc !== "fail") return "warn"

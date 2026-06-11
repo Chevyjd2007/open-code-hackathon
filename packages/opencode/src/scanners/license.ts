@@ -24,7 +24,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
 
   if (!diff) return { status: "pass", findings: [] }
 
-  console.log("    • [LICENSE] Checking licenses and dependencies...")
   const lines = diff.split(/\r?\n/)
   let currentPath: string | undefined
 
@@ -68,7 +67,6 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
 
   // Fail if any restrictive license is found, warn on unapproved libraries
   const hasRestrictiveLicense = findings.some((f) => f.reason.includes("Restrictive license"))
-  console.log(`    • [LICENSE] Found ${findings.length} license/dependency issue(s)`)
   if (hasRestrictiveLicense) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }

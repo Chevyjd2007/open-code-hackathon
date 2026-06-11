@@ -56,25 +56,19 @@ export const WriteTool = Tool.define(
           const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, contentNew))
           
           // Run prewrite scanners
-          console.log("🔍 [SCAN] Running pre-write security scans...")
-          console.log("🔍 [SCAN] Checking for: secrets, licenses, vulnerabilities")
           const scanStartTime = Date.now()
           const scanOutput: { prewriteScan?: { status: string; findings: any[] } } = {}
           yield* plugin.trigger("prewrite_scan", { diff, user: ctx.user, workspace: instance.directory }, scanOutput)
           const scanResult = scanOutput.prewriteScan
           const scanDuration = Date.now() - scanStartTime
-          console.log(`✓ [SCAN] Security scan completed in ${scanDuration}ms`)
 
           // Handle scan results and log
           if (scanResult && scanResult.status !== "pass") {
-            console.log(`⚠️  [SCAN] Status: ${scanResult.status.toUpperCase()} - Found ${scanResult.findings.length} issue(s)`)
             const scanFindings = scanResult.findings.map((f: any) => 
               `  [${f.scanner}] ${f.path}:${f.line} - ${f.reason}${f.match ? ` (${f.match})` : ""}`
             ).join("\n")
-            console.log("📋 [SCAN] Findings:\n" + scanFindings)
             
             if (scanResult.status === "fail") {
-              console.log("🛑 [SCAN] BLOCKED - Critical security issues detected")
               // Log blocked write
               logScanResult({
                 timestamp: new Date().toISOString(),
@@ -109,9 +103,7 @@ export const WriteTool = Tool.define(
                 action: "overridden",
                 overrideReason: "User manually overrode blocked scan",
               })
-              console.log("✓ [SCAN] User overrode blocked scan - continuing with write")
             } else if (scanResult.status === "warn") {
-              console.log("⚠️  [SCAN] WARNING - Potential security issues detected")
               // Request override for warnings
               yield* ctx.ask({
                 permission: "scan_override",
@@ -136,10 +128,8 @@ export const WriteTool = Tool.define(
                 action: "overridden",
                 overrideReason: "User overrode warnings",
               })
-              console.log("✓ [SCAN] User overrode warnings - continuing with write")
             }
           } else if (scanResult) {
-            console.log("✅ [SCAN] PASSED - No security issues detected")
             // Log successful scan
             logScanResult({
               timestamp: new Date().toISOString(),
@@ -173,13 +163,44 @@ export const WriteTool = Tool.define(
 
           let output = "Wrote file successfully."
           
-          // Add scan summary to output
+          // Add comprehensive scan report to output
           if (scanResult) {
-            output += `\n\n🔍 Security Scan: ${scanResult.status.toUpperCase()}`
+            output += `\n\n${"=".repeat(60)}`
+            output += `\n🔍 PRE-WRITE SECURITY SCAN REPORT`
+            output += `\n${"=".repeat(60)}`
+            output += `\nScan Duration: ${scanDuration}ms`
+            output += `\nStatus: ${scanResult.status === "pass" ? "✅ PASS" : scanResult.status === "warn" ? "⚠️  WARN" : "🛑 FAIL"}`
+            output += `\nFindings: ${scanResult.findings.length}`
+            
             if (scanResult.findings.length > 0) {
-              output += ` (${scanResult.findings.length} finding(s))`
+              output += `\n\n--- Detailed Findings ---`
+              
+              // Group findings by scanner
+              const byScanner: Record<string, any[]> = {}
+              scanResult.findings.forEach((f: any) => {
+                if (!byScanner[f.scanner]) byScanner[f.scanner] = []
+                byScanner[f.scanner].push(f)
+              })
+              
+              for (const [scanner, findings] of Object.entries(byScanner)) {
+                output += `\n\n[${scanner.toUpperCase()}] ${findings.length} issue(s):`
+                findings.forEach((f: any, idx: number) => {
+                  output += `\n  ${idx + 1}. Line ${f.line || "?"}: ${f.reason}`
+                  if (f.match) output += `\n     Match: "${f.match}"`
+                })
+              }
+              
+              if (scanResult.status === "fail") {
+                output += `\n\n⚠️  CRITICAL: This write contained security issues that were blocked.`
+                output += `\n   User override was required to proceed.`
+              } else if (scanResult.status === "warn") {
+                output += `\n\n⚠️  WARNING: Review findings carefully. User override was required.`
+              }
+            } else {
+              output += `\n✅ No security issues detected.`
             }
-            output += ` - completed in ${scanDuration}ms`
+            
+            output += `\n${"=".repeat(60)}`
           }
           
           yield* lsp.touchFile(filepath, "document")

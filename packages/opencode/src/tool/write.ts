@@ -17,6 +17,8 @@ import * as Bom from "@/util/bom"
 import { Plugin } from "@/plugin"
 import { logScanResult } from "@/scanners/log"
 import { severityDisplay } from "@/scanners"
+import { getLifecyclePipeline } from "@/lifecycle/pipeline"
+import { sha256 } from "@/lifecycle/repository"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -62,6 +64,32 @@ export const WriteTool = Tool.define(
           yield* plugin.trigger("prewrite_scan", { diff, user: ctx.user, workspace: instance.directory }, scanOutput)
           const scanResult = scanOutput.prewriteScan
           const scanDuration = Date.now() - scanStartTime
+
+          // Track suggestion lifecycle - record as proposed after scan completes
+          let suggestionId: string | undefined
+          if (scanResult) {
+            try {
+              const lifecycle = getLifecyclePipeline(instance.directory)
+              suggestionId = lifecycle.recordProposed({
+                sessionId: ctx.sessionID,
+                model: "unknown", // TODO: Get from context
+                provider: "unknown", // TODO: Get from context
+                promptHash: sha256(JSON.stringify({ content: params.content, filePath: params.filePath })),
+                userIdentity: ctx.user,
+                scanStatus: scanResult.status,
+                scanFindings: scanResult.findings,
+                files: [{
+                  filePath: filepath,
+                  oldContent: contentOld || undefined,
+                  newContent: contentNew,
+                  diffText: diff,
+                }],
+              })
+            } catch (error) {
+              // Never fail the write due to lifecycle tracking errors
+              console.error("Failed to record suggestion:", error)
+            }
+          }
 
           // Handle scan results and log
           if (scanResult && scanResult.status !== "pass") {
@@ -119,6 +147,16 @@ export const WriteTool = Tool.define(
                       action: "rejected",
                       overrideReason: "User rejected scan override",
                     })
+                    
+                    // Mark suggestion as discarded for user rejection
+                    if (suggestionId) {
+                      try {
+                        const lifecycle = getLifecyclePipeline(instance.directory)
+                        lifecycle.discardForUserRejection(suggestionId)
+                      } catch (error) {
+                        console.error("Failed to mark suggestion as discarded:", error)
+                      }
+                    }
                   })
                 )
               )
@@ -162,6 +200,16 @@ export const WriteTool = Tool.define(
                       action: "rejected",
                       overrideReason: "User rejected warnings",
                     })
+                    
+                    // Mark suggestion as discarded for user rejection
+                    if (suggestionId) {
+                      try {
+                        const lifecycle = getLifecyclePipeline(instance.directory)
+                        lifecycle.discardForUserRejection(suggestionId)
+                      } catch (error) {
+                        console.error("Failed to mark suggestion as discarded:", error)
+                      }
+                    }
                   })
                 )
               )
@@ -197,6 +245,16 @@ export const WriteTool = Tool.define(
             file: filepath,
             event: exists ? "change" : "add",
           })
+
+          // Mark suggestion as accepted after successful write
+          if (suggestionId) {
+            try {
+              const lifecycle = getLifecyclePipeline(instance.directory)
+              lifecycle.acceptSuggestion(suggestionId)
+            } catch (error) {
+              console.error("Failed to mark suggestion as accepted:", error)
+            }
+          }
 
           let output = "Wrote file successfully."
           
@@ -253,6 +311,13 @@ export const WriteTool = Tool.define(
             }
             
             output += `\n${"=".repeat(60)}`
+            
+            // Add suggestion ID footer for lifecycle tracking
+            if (suggestionId) {
+              const shortId = suggestionId.substring(0, 8)
+              output += `\n\n📋 Suggestion ID: ${shortId}`
+              output += `\n   Track lifecycle: opencode lifecycle inspect ${shortId}`
+            }
           }
           
           yield* lsp.touchFile(filepath, "document")

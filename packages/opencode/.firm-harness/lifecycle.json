@@ -1,0 +1,39 @@
+{
+  "suggestions": [
+    {
+      "id": "0df7516a-5062-419d-a996-88bf52c53159",
+      "sessionId": "test-session",
+      "createdAt": 1781235639770,
+      "model": "test-model",
+      "provider": "test",
+      "promptHash": "test-hash",
+      "userIdentity": null,
+      "status": "proposed",
+      "discardReason": null,
+      "commitSha": null,
+      "shippedAt": null,
+      "scanStatus": null,
+      "scanFindings": null
+    }
+  ],
+  "files": [
+    {
+      "suggestionId": "0df7516a-5062-419d-a996-88bf52c53159",
+      "filePath": "test.ts",
+      "oldContentHash": null,
+      "newContentHash": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+      "linesAdded": 1,
+      "linesRemoved": 0,
+      "diffText": "+hello world"
+    }
+  ],
+  "transitions": [
+    {
+      "suggestionId": "0df7516a-5062-419d-a996-88bf52c53159",
+      "fromStatus": null,
+      "toStatus": "proposed",
+      "reason": null,
+      "transitionedAt": 1781235639770
+    }
+  ]
+}

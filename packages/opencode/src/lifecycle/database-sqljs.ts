@@ -1,9 +1,12 @@
-// Use in-memory database for now (no native dependencies)
-export * from "./database-memory"
+import initSqlJs, { Database as SqlJsDatabase } from "sql.js"
+import fs from "fs"
+import path from "path"
+
+let dbInstance: SqlJsDatabase | null = null
+let sqlJs: any = null
 
 /**
- * Walks up the directory tree to find the project root containing .firm-harness/
- * Creates the directory if it doesn't exist.
+ * Finds or creates .firm-harness directory
  */
 function findProjectRoot(startDir: string = process.cwd()): string {
   let currentDir = startDir
@@ -11,51 +14,32 @@ function findProjectRoot(startDir: string = process.cwd()): string {
 
   while (currentDir !== root) {
     const firmHarnessPath = path.join(currentDir, ".firm-harness")
-    
-    // Check if .firm-harness exists
     if (fs.existsSync(firmHarnessPath)) {
       return currentDir
     }
-
-    // Move up one directory
     const parentDir = path.dirname(currentDir)
     if (parentDir === currentDir) break
     currentDir = parentDir
   }
 
-  // Not found, create .firm-harness in the start directory
   const firmHarnessPath = path.join(startDir, ".firm-harness")
   if (!fs.existsSync(firmHarnessPath)) {
     fs.mkdirSync(firmHarnessPath, { recursive: true })
   }
-  
   return startDir
 }
 
-/**
- * Get the path to the SQLite database file
- */
 function getDatabasePath(projectRoot?: string): string {
   const root = projectRoot || findProjectRoot()
   const firmHarnessDir = path.join(root, ".firm-harness")
-  
-  // Ensure directory exists
   if (!fs.existsSync(firmHarnessDir)) {
     fs.mkdirSync(firmHarnessDir, { recursive: true })
   }
-  
   return path.join(firmHarnessDir, "lifecycle.db")
 }
 
-/**
- * Run idempotent migrations to create tables and indexes
- */
-function runMigrations(db: Database.Database): void {
-  // Enable foreign keys
-  db.pragma("foreign_keys = ON")
-
-  // Create suggestions table
-  db.exec(`
+function runMigrations(db: SqlJsDatabase): void {
+  db.run(`
     CREATE TABLE IF NOT EXISTS suggestions (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -73,8 +57,7 @@ function runMigrations(db: Database.Database): void {
     )
   `)
 
-  // Create suggestion_files table
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS suggestion_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       suggestion_id TEXT NOT NULL,
@@ -88,8 +71,7 @@ function runMigrations(db: Database.Database): void {
     )
   `)
 
-  // Create status_transitions table (append-only log)
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS status_transitions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       suggestion_id TEXT NOT NULL,
@@ -101,74 +83,60 @@ function runMigrations(db: Database.Database): void {
     )
   `)
 
-  // Create indexes
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_suggestions_status 
-    ON suggestions(status)
-  `)
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_suggestions_session_id 
-    ON suggestions(session_id)
-  `)
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_suggestion_files_new_content_hash 
-    ON suggestion_files(new_content_hash)
-  `)
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_suggestion_files_suggestion_id 
-    ON suggestion_files(suggestion_id)
-  `)
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_status_transitions_suggestion_id 
-    ON status_transitions(suggestion_id)
-  `)
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_suggestion_files_file_path 
-    ON suggestion_files(file_path)
-  `)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_suggestions_session_id ON suggestions(session_id)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_suggestion_files_new_content_hash ON suggestion_files(new_content_hash)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_suggestion_files_suggestion_id ON suggestion_files(suggestion_id)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_status_transitions_suggestion_id ON status_transitions(suggestion_id)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_suggestion_files_file_path ON suggestion_files(file_path)`)
 }
 
-/**
- * Opens the SQLite database, running migrations if needed.
- * Returns a cached instance on subsequent calls.
- */
-export function openDatabase(projectRoot?: string): Database.Database {
-  if (dbInstance) {
-    return dbInstance
+export async function openDatabase(projectRoot?: string): Promise<SqlJsDatabase> {
+  if (dbInstance) return dbInstance
+
+  if (!sqlJs) {
+    sqlJs = await initSqlJs()
   }
 
   const dbPath = getDatabasePath(projectRoot)
-  dbInstance = new Database(dbPath)
   
-  // Run migrations
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath)
+    dbInstance = new sqlJs.Database(buffer)
+  } else {
+    dbInstance = new sqlJs.Database()
+  }
+
+  dbInstance.run("PRAGMA foreign_keys = ON")
   runMigrations(dbInstance)
   
+  // Save to disk
+  const data = dbInstance.export()
+  fs.writeFileSync(dbPath, data)
+
   return dbInstance
 }
 
-/**
- * Closes the database connection and clears the cached instance
- */
-export function closeDatabase(): void {
+export function closeDatabase(projectRoot?: string): void {
   if (dbInstance) {
+    const dbPath = getDatabasePath(projectRoot)
+    const data = dbInstance.export()
+    fs.writeFileSync(dbPath, data)
     dbInstance.close()
     dbInstance = null
   }
 }
 
-/**
- * Gets the current database instance without opening a new one
- */
-export function getDatabase(): Database.Database | null {
+export function getDatabase(): SqlJsDatabase | null {
   return dbInstance
 }
 
-/**
- * Helper to get project root - exposed for testing
- */
+export function saveDatabase(projectRoot?: string): void {
+  if (dbInstance) {
+    const dbPath = getDatabasePath(projectRoot)
+    const data = dbInstance.export()
+    fs.writeFileSync(dbPath, data)
+  }
+}
+
 export { findProjectRoot, getDatabasePath }

@@ -65,30 +65,31 @@ export const WriteTool = Tool.define(
           const scanResult = scanOutput.prewriteScan
           const scanDuration = Date.now() - scanStartTime
 
-          // Track suggestion lifecycle - record as proposed after scan completes
+          // Track suggestion lifecycle - always record, even if no scan
           let suggestionId: string | undefined
-          if (scanResult) {
-            try {
-              const lifecycle = getLifecyclePipeline(instance.directory)
-              suggestionId = lifecycle.recordProposed({
-                sessionId: ctx.sessionID,
-                model: "unknown", // TODO: Get from context
-                provider: "unknown", // TODO: Get from context
-                promptHash: sha256(JSON.stringify({ content: params.content, filePath: params.filePath })),
-                userIdentity: ctx.user,
-                scanStatus: scanResult.status,
-                scanFindings: scanResult.findings,
-                files: [{
-                  filePath: filepath,
-                  oldContent: contentOld || undefined,
-                  newContent: contentNew,
-                  diffText: diff,
-                }],
-              })
-            } catch (error) {
-              // Never fail the write due to lifecycle tracking errors
-              console.error("Failed to record suggestion:", error)
-            }
+          try {
+            console.log("🔵 Lifecycle: Starting to record suggestion...")
+            const lifecycle = getLifecyclePipeline(instance.directory)
+            console.log("🔵 Lifecycle: Pipeline obtained, recording...")
+            suggestionId = lifecycle.recordProposed({
+              sessionId: ctx.sessionID,
+              model: "unknown", // TODO: Get from context
+              provider: "unknown", // TODO: Get from context
+              promptHash: sha256(JSON.stringify({ content: params.content, filePath: params.filePath })),
+              userIdentity: ctx.user,
+              scanStatus: scanResult?.status || null,
+              scanFindings: scanResult?.findings || [],
+              files: [{
+                filePath: filepath,
+                oldContent: contentOld || undefined,
+                newContent: contentNew,
+                diffText: diff,
+              }],
+            })
+            console.log("🔵 Lifecycle: Recorded! ID:", suggestionId.substring(0, 8))
+          } catch (error) {
+            // Never fail the write due to lifecycle tracking errors
+            console.error("🔴 Failed to record suggestion:", error)
           }
 
           // Handle scan results and log

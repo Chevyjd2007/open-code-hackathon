@@ -1,7 +1,5 @@
-import type Database from "better-sqlite3"
-import { randomUUID } from "crypto"
-import { createHash } from "crypto"
-import { openDatabase } from "./database"
+// Simple JSON-based repository (no database dependencies)
+export * from "./repository-json"
 import {
   SuggestionStatus,
   DiscardReason,
@@ -43,105 +41,22 @@ function countDiffLines(diff: string): { added: number; removed: number } {
  * Repository class for managing suggestion lifecycle
  */
 export class SuggestionRepository {
-  private db: Database.Database
-
-  // Prepared statements (reused for performance)
-  private stmtInsertSuggestion: Database.Statement
-  private stmtInsertFile: Database.Statement
-  private stmtInsertTransition: Database.Statement
-  private stmtUpdateStatus: Database.Statement
-  private stmtUpdateShipped: Database.Statement
-  private stmtGetSuggestion: Database.Statement
-  private stmtGetFiles: Database.Statement
-  private stmtGetTransitions: Database.Statement
-  private stmtFindByContentHash: Database.Statement
-  private stmtFindRecentByFilePath: Database.Statement
-  private stmtListBySession: Database.Statement
-  private stmtListAll: Database.Statement
-  private stmtListAfter: Database.Statement
+  private db: SqlJsDatabase | null = null
+  private projectRoot?: string
 
   constructor(projectRoot?: string) {
-    this.db = openDatabase(projectRoot)
+    this.projectRoot = projectRoot
+  }
 
-    // Prepare statements
-    this.stmtInsertSuggestion = this.db.prepare(`
-      INSERT INTO suggestions (
-        id, session_id, created_at, model, provider, prompt_hash,
-        user_identity, status, scan_status, scan_findings
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
+  private async ensureDb(): Promise<SqlJsDatabase> {
+    if (!this.db) {
+      this.db = await openDatabase(this.projectRoot)
+    }
+    return this.db
+  }
 
-    this.stmtInsertFile = this.db.prepare(`
-      INSERT INTO suggestion_files (
-        suggestion_id, file_path, old_content_hash, new_content_hash,
-        lines_added, lines_removed, diff_text
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `)
-
-    this.stmtInsertTransition = this.db.prepare(`
-      INSERT INTO status_transitions (
-        suggestion_id, from_status, to_status, reason, transitioned_at
-      ) VALUES (?, ?, ?, ?, ?)
-    `)
-
-    this.stmtUpdateStatus = this.db.prepare(`
-      UPDATE suggestions 
-      SET status = ?, discard_reason = ?
-      WHERE id = ?
-    `)
-
-    this.stmtUpdateShipped = this.db.prepare(`
-      UPDATE suggestions 
-      SET status = ?, commit_sha = ?, shipped_at = ?
-      WHERE id = ?
-    `)
-
-    this.stmtGetSuggestion = this.db.prepare(`
-      SELECT * FROM suggestions WHERE id = ?
-    `)
-
-    this.stmtGetFiles = this.db.prepare(`
-      SELECT * FROM suggestion_files WHERE suggestion_id = ?
-    `)
-
-    this.stmtGetTransitions = this.db.prepare(`
-      SELECT * FROM status_transitions 
-      WHERE suggestion_id = ?
-      ORDER BY transitioned_at ASC
-    `)
-
-    this.stmtFindByContentHash = this.db.prepare(`
-      SELECT DISTINCT s.* 
-      FROM suggestions s
-      JOIN suggestion_files sf ON s.id = sf.suggestion_id
-      WHERE s.status = ? AND sf.new_content_hash = ?
-    `)
-
-    this.stmtFindRecentByFilePath = this.db.prepare(`
-      SELECT DISTINCT s.*
-      FROM suggestions s
-      JOIN suggestion_files sf ON s.id = sf.suggestion_id
-      WHERE s.status = ? AND sf.file_path = ?
-      ORDER BY s.created_at DESC
-      LIMIT ?
-    `)
-
-    this.stmtListBySession = this.db.prepare(`
-      SELECT * FROM suggestions
-      WHERE session_id = ?
-      ORDER BY created_at DESC
-    `)
-
-    this.stmtListAll = this.db.prepare(`
-      SELECT * FROM suggestions
-      ORDER BY created_at DESC
-    `)
-
-    this.stmtListAfter = this.db.prepare(`
-      SELECT * FROM suggestions
-      WHERE created_at > ?
-      ORDER BY created_at DESC
-    `)
+  private save(): void {
+    saveDatabase(this.projectRoot)
   }
 
   /**

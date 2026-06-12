@@ -18,6 +18,8 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { getLifecyclePipeline } from "@/lifecycle/pipeline"
+import { sha256 } from "@/lifecycle/repository"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -193,7 +195,39 @@ export const EditTool = Tool.define(
             },
           })
 
+          // 🎯 LIFECYCLE TRACKING - Record edit
+          let suggestionId: string | undefined
+          try {
+            console.log("🔵 Lifecycle (EDIT): Recording suggestion...")
+            const lifecycle = getLifecyclePipeline(instance.directory)
+            suggestionId = lifecycle.recordProposed({
+              sessionId: ctx.sessionID,
+              model: "unknown",
+              provider: "unknown",
+              promptHash: sha256(JSON.stringify({ oldString: params.oldString, newString: params.newString, filePath })),
+              userIdentity: ctx.user,
+              scanStatus: null,
+              scanFindings: [],
+              files: [{
+                filePath,
+                oldContent: before.text || undefined,
+                newContent: contentNew,
+                diffText: diff,
+              }],
+            }).id
+            lifecycle.acceptSuggestion(suggestionId)
+            console.log("🔵 Lifecycle (EDIT): Tracked! ID:", suggestionId.substring(0, 8))
+          } catch (error) {
+            console.error("🔴 Lifecycle (EDIT) failed:", error)
+          }
+
           let output = "Edit applied successfully."
+          
+          // Add suggestion ID to output
+          if (suggestionId) {
+            output += `\n\n📋 Suggestion ID: ${suggestionId.substring(0, 8)}`
+            output += `\n   Track lifecycle: cat .firm-harness/lifecycle.json`
+          }
           yield* lsp.touchFile(filePath, "document")
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilePath = FSUtil.normalizePath(filePath)

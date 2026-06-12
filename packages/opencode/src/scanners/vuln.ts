@@ -1,4 +1,4 @@
-import type { ScanResult, ScanFinding } from "./index"
+import type { ScanResult, ScanFinding, SeverityLevel } from "./index"
 import fs from "fs"
 import path from "path"
 
@@ -35,7 +35,7 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
     // Only check added lines
     if (!line.startsWith("+")) continue
 
-    // Check for banned APIs
+    // Check for banned APIs - CRITICAL severity
     for (const api of bannedApis) {
       if (line.includes(api)) {
         findings.push({
@@ -44,11 +44,12 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
           reason: `Dangerous API usage: ${api}`,
           match: api,
           scanner: "vulnerability",
+          severity: "critical" as SeverityLevel,
         })
       }
     }
 
-    // Check for SQL injection patterns
+    // Check for SQL injection patterns - CRITICAL severity
     const sqlPatterns = [
       /\$\{[^}]*\}.*(?:SELECT|INSERT|UPDATE|DELETE|DROP)/i,
       /`.*\$\{.*\}.*`.*(?:SELECT|INSERT|UPDATE|DELETE|DROP)/i,
@@ -63,12 +64,13 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
           reason: "Potential SQL injection vulnerability (string concatenation in query)",
           match: line.trim().substring(0, 50),
           scanner: "vulnerability",
+          severity: "critical" as SeverityLevel,
         })
         break
       }
     }
 
-    // Check for command injection patterns
+    // Check for command injection patterns - CRITICAL severity
     if (/exec\(|spawn\(|execSync\(|spawnSync\(/.test(line) && /\$\{|`.*\$\{|\+/.test(line)) {
       findings.push({
         path: currentPath,
@@ -76,10 +78,11 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
         reason: "Potential command injection (dynamic command execution)",
         match: line.trim().substring(0, 50),
         scanner: "vulnerability",
+        severity: "critical" as SeverityLevel,
       })
     }
 
-    // Check for path traversal
+    // Check for path traversal - HIGH severity
     if (/(readFile|writeFile|readFileSync|writeFileSync)\(.*\.\.\//i.test(line)) {
       findings.push({
         path: currentPath,
@@ -87,10 +90,11 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
         reason: "Potential path traversal vulnerability",
         match: line.trim().substring(0, 50),
         scanner: "vulnerability",
+        severity: "high" as SeverityLevel,
       })
     }
 
-    // Check for insecure random
+    // Check for insecure random - MEDIUM severity
     if (/Math\.random\(\)/.test(line) && /(token|secret|key|password|session)/i.test(line)) {
       findings.push({
         path: currentPath,
@@ -98,18 +102,14 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
         reason: "Insecure random number generator for security-sensitive value",
         match: "Math.random()",
         scanner: "vulnerability",
+        severity: "medium" as SeverityLevel,
       })
     }
   }
 
-  // Fail if SQL injection, command injection, or banned APIs are found
-  const hasHighSeverity = findings.some(
-    (f) =>
-      f.reason.includes("injection") ||
-      f.reason.includes("Dangerous API") ||
-      f.reason.includes("path traversal"),
-  )
-  if (hasHighSeverity) return { status: "fail", findings }
+  // Fail if CRITICAL severity found
+  const hasCritical = findings.some((f) => f.severity === "critical")
+  if (hasCritical) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }
 }

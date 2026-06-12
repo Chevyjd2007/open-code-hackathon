@@ -16,6 +16,7 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import * as Bom from "@/util/bom"
 import { Plugin } from "@/plugin"
 import { logScanResult } from "@/scanners/log"
+import { severityDisplay } from "@/scanners"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -79,7 +80,7 @@ export const WriteTool = Tool.define(
                 action: "blocked",
               })
               
-              // Block the write on scan failure
+              // Block the write on scan failure - require explicit override
               yield* ctx.ask({
                 permission: "scan_override",
                 patterns: [path.relative(instance.worktree, filepath)],
@@ -91,18 +92,36 @@ export const WriteTool = Tool.define(
                   scanFindings,
                   blocked: true,
                 },
-              })
-              
-              // Log override if user proceeded
-              logScanResult({
-                timestamp: new Date().toISOString(),
-                filepath,
-                user: ctx.user,
-                workspace: instance.directory,
-                scanResult,
-                action: "overridden",
-                overrideReason: "User manually overrode blocked scan",
-              })
+              }).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    // Log override only if permission was granted
+                    logScanResult({
+                      timestamp: new Date().toISOString(),
+                      filepath,
+                      user: ctx.user,
+                      workspace: instance.directory,
+                      scanResult,
+                      action: "overridden",
+                      overrideReason: "User manually overrode blocked scan",
+                    })
+                  })
+                ),
+                Effect.tapError(() =>
+                  Effect.sync(() => {
+                    // Log rejection if permission was denied
+                    logScanResult({
+                      timestamp: new Date().toISOString(),
+                      filepath,
+                      user: ctx.user,
+                      workspace: instance.directory,
+                      scanResult,
+                      action: "rejected",
+                      overrideReason: "User rejected scan override",
+                    })
+                  })
+                )
+              )
             } else if (scanResult.status === "warn") {
               // Request override for warnings
               yield* ctx.ask({
@@ -116,18 +135,36 @@ export const WriteTool = Tool.define(
                   scanFindings,
                   blocked: false,
                 },
-              })
-              
-              // Log warning override
-              logScanResult({
-                timestamp: new Date().toISOString(),
-                filepath,
-                user: ctx.user,
-                workspace: instance.directory,
-                scanResult,
-                action: "overridden",
-                overrideReason: "User overrode warnings",
-              })
+              }).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    // Log override only if permission was granted
+                    logScanResult({
+                      timestamp: new Date().toISOString(),
+                      filepath,
+                      user: ctx.user,
+                      workspace: instance.directory,
+                      scanResult,
+                      action: "overridden",
+                      overrideReason: "User overrode warnings",
+                    })
+                  })
+                ),
+                Effect.tapError(() =>
+                  Effect.sync(() => {
+                    // Log rejection if permission was denied
+                    logScanResult({
+                      timestamp: new Date().toISOString(),
+                      filepath,
+                      user: ctx.user,
+                      workspace: instance.directory,
+                      scanResult,
+                      action: "rejected",
+                      overrideReason: "User rejected warnings",
+                    })
+                  })
+                )
+              )
             }
           } else if (scanResult) {
             // Log successful scan
@@ -173,25 +210,40 @@ export const WriteTool = Tool.define(
             output += `\nFindings: ${scanResult.findings.length}`
             
             if (scanResult.findings.length > 0) {
-              output += `\n\n--- Detailed Findings ---`
+              output += `\n\n--- Detailed Findings (sorted by severity) ---`
               
-              // Group findings by scanner
-              const byScanner: Record<string, any[]> = {}
+              // Group findings by severity level
+              const bySeverity: Record<string, any[]> = {
+                critical: [],
+                high: [],
+                medium: [],
+                low: [],
+              }
               scanResult.findings.forEach((f: any) => {
-                if (!byScanner[f.scanner]) byScanner[f.scanner] = []
-                byScanner[f.scanner].push(f)
+                if (bySeverity[f.severity]) {
+                  bySeverity[f.severity].push(f)
+                }
               })
               
-              for (const [scanner, findings] of Object.entries(byScanner)) {
-                output += `\n\n[${scanner.toUpperCase()}] ${findings.length} issue(s):`
+              // Display findings grouped by severity
+              for (const [severity, findings] of Object.entries(bySeverity)) {
+                if (findings.length === 0) continue
+                
+                const severityInfo = severityDisplay[severity as keyof typeof severityDisplay]
+                output += `\n\n${severityInfo.emoji} ${severityInfo.label} (${findings.length} issue(s)) - ${severityInfo.description}`
+                
                 findings.forEach((f: any, idx: number) => {
-                  output += `\n  ${idx + 1}. Line ${f.line || "?"}: ${f.reason}`
+                  output += `\n  ${idx + 1}. [${f.scanner.toUpperCase()}] Line ${f.line || "?"}: ${f.reason}`
                   if (f.match) output += `\n     Match: "${f.match}"`
                 })
               }
               
+              // Summary message
+              const criticalCount = bySeverity.critical.length
+              const highCount = bySeverity.high.length
+              
               if (scanResult.status === "fail") {
-                output += `\n\n⚠️  CRITICAL: This write contained security issues that were blocked.`
+                output += `\n\n🛑 CRITICAL: This write contained ${criticalCount} critical and ${highCount} high severity issues.`
                 output += `\n   User override was required to proceed.`
               } else if (scanResult.status === "warn") {
                 output += `\n\n⚠️  WARNING: Review findings carefully. User override was required.`

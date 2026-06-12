@@ -1,4 +1,4 @@
-import type { ScanResult, ScanFinding } from "./index"
+import type { ScanResult, ScanFinding, SeverityLevel } from "./index"
 import fs from "fs"
 import path from "path"
 
@@ -44,6 +44,7 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
             reason: `Restrictive license detected: ${license}`,
             match: license,
             scanner: "license",
+            severity: "high" as SeverityLevel,
           })
         }
       }
@@ -59,15 +60,16 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
             reason: `Unapproved library: ${pkg} (not in approved list)`,
             match: pkg,
             scanner: "license",
+            severity: "medium" as SeverityLevel,
           })
         }
       }
     }
   }
 
-  // Fail if any restrictive license is found, warn on unapproved libraries
-  const hasRestrictiveLicense = findings.some((f) => f.reason.includes("Restrictive license"))
-  if (hasRestrictiveLicense) return { status: "fail", findings }
+  // Fail if any HIGH severity found (restrictive licenses)
+  const hasHigh = findings.some((f) => f.severity === "high")
+  if (hasHigh) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }
 }

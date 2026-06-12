@@ -1,4 +1,4 @@
-import type { ScanResult, ScanFinding } from "./index"
+import type { ScanResult, ScanFinding, SeverityLevel } from "./index"
 import fs from "fs"
 import path from "path"
 
@@ -25,15 +25,15 @@ function loadConfig() {
 }
 
 const defaultRules = [
-  { name: "private_key", regex: /-----BEGIN [A-Z ]+ PRIVATE KEY-----/, severity: "fail", reason: "Private key block" },
-  { name: "aws_access", regex: /AKIA[0-9A-Z]{16}/, severity: "warn", reason: "AWS access key id" },
-  { name: "jwt", regex: /\b[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\b/, severity: "warn", reason: "Possible JWT token" },
-  { name: "assignment_key", regex: /(?:api[_-]?key|secret|token)\s*[:=]\s*['"]([A-Za-z0-9-_+\/=]{6,})['"]/i, severity: "warn", reason: "Credential assigned in code" },
+  { name: "private_key", regex: /-----BEGIN [A-Z ]+ PRIVATE KEY-----/, severity: "critical", reason: "Private key block" },
+  { name: "aws_access", regex: /AKIA[0-9A-Z]{16}/, severity: "high", reason: "AWS access key id" },
+  { name: "jwt", regex: /\b[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\b/, severity: "low", reason: "Possible JWT token" },
+  { name: "assignment_key", regex: /(?:api[_-]?key|secret|token)\s*[:=]\s*['"]([A-Za-z0-9-_+\/=]{6,})['"]/i, severity: "high", reason: "Credential assigned in code" },
 ]
 
 export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
   const cfg = loadConfig()
-  const rules = cfg?.secretRegexes ? Object.entries(cfg.secretRegexes).map(([k, v]: any) => ({ name: k, regex: new RegExp(v), severity: "warn", reason: k })) : defaultRules
+  const rules = cfg?.secretRegexes ? Object.entries(cfg.secretRegexes).map(([k, v]: any) => ({ name: k, regex: new RegExp(v), severity: "high", reason: k })) : defaultRules
   const entropyThreshold = cfg?.entropyThreshold ?? 4.2
   const findings: ScanFinding[] = []
 
@@ -52,30 +52,52 @@ export async function scan(diff: string, _ctx: any): Promise<ScanResult> {
     for (const rule of rules) {
       const m = line.match(rule.regex)
       if (m) {
-        findings.push({ path: currentPath, line: i + 1, reason: rule.reason, match: m[0], scanner: "secret" })
+        findings.push({
+          path: currentPath,
+          line: i + 1,
+          reason: rule.reason,
+          match: m[0],
+          scanner: "secret",
+          severity: rule.severity as SeverityLevel,
+        })
       }
     }
 
-    // Heuristic: hardcoded fallback next to env access or variable named KEY/TOKEN
+    // Heuristic: hardcoded fallback next to env access or variable named KEY/TOKEN - HIGH severity
     if (/\b(API|KEY|TOKEN|SECRET)\b/i.test(line)) {
       const lit = line.match(/['"]([^'"]{6,})['"]/)
       if (lit) {
-        findings.push({ path: currentPath, line: i + 1, reason: "Hardcoded secret-like string next to KEY/TOKEN", match: lit[1], scanner: "secret" })
+        findings.push({
+          path: currentPath,
+          line: i + 1,
+          reason: "Hardcoded secret-like string next to KEY/TOKEN",
+          match: lit[1],
+          scanner: "secret",
+          severity: "high" as SeverityLevel,
+        })
       }
     }
 
-    // Entropy check for base64-like tokens
+    // Entropy check for base64-like tokens - MEDIUM severity
     const tokens = Array.from(line.matchAll(/[A-Za-z0-9+/=]{20,}/g)).map((m) => m[0])
     for (const tok of tokens) {
       const ent = shannonEntropy(tok)
       if (ent >= entropyThreshold) {
-        findings.push({ path: currentPath, line: i + 1, reason: `High entropy token (entropy=${ent.toFixed(2)})`, match: tok, scanner: "secret" })
+        findings.push({
+          path: currentPath,
+          line: i + 1,
+          reason: `High entropy token (entropy=${ent.toFixed(2)})`,
+          match: tok,
+          scanner: "secret",
+          severity: "medium" as SeverityLevel,
+        })
       }
     }
   }
 
-  const hasFail = findings.some((f) => f.reason.toLowerCase().includes("private key"))
-  if (hasFail) return { status: "fail", findings }
+  // Fail if CRITICAL severity found (private keys)
+  const hasCritical = findings.some((f) => f.severity === "critical")
+  if (hasCritical) return { status: "fail", findings }
   if (findings.length) return { status: "warn", findings }
   return { status: "pass", findings: [] }
 }

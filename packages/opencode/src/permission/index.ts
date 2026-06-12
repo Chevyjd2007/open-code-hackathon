@@ -80,6 +80,14 @@ export const layer = Layer.effect(
       const { ruleset, ...request } = input
       let needsAsk = false
 
+      // SECURITY: scan_override permissions must ALWAYS require user confirmation
+      // Never auto-grant security scan overrides, even if rules say "allow"
+      const isScanOverride = request.permission === "scan_override"
+      if (isScanOverride) {
+        needsAsk = true
+        yield* Effect.logWarning("scan_override permission requires explicit user confirmation")
+      }
+
       for (const pattern of request.patterns) {
         const rule = evaluate(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
@@ -88,7 +96,8 @@ export const layer = Layer.effect(
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
           })
         }
-        if (rule.action === "allow") continue
+        // SECURITY: For scan_override, ignore "allow" rules and force ask
+        if (rule.action === "allow" && !isScanOverride) continue
         needsAsk = true
       }
 
@@ -152,6 +161,13 @@ export const layer = Layer.effect(
 
       yield* Deferred.succeed(existing.deferred, undefined)
       if (input.reply === "once") return
+
+      // SECURITY: Never add scan_override to approved list
+      // Security scan overrides must be confirmed every single time
+      if (existing.info.permission === "scan_override") {
+        yield* Effect.logWarning("scan_override cannot be permanently approved - security policy")
+        return
+      }
 
       for (const pattern of existing.info.always) {
         approved.push({

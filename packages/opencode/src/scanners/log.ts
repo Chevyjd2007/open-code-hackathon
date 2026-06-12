@@ -8,7 +8,7 @@ export type ScanLogEntry = {
   user?: string
   workspace?: string
   scanResult: ScanResult
-  action: "blocked" | "overridden" | "passed"
+  action: "blocked" | "overridden" | "passed" | "rejected"
   overrideReason?: string
 }
 

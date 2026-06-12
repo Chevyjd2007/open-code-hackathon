@@ -697,6 +697,11 @@ function scrollWriteStart(_: ToolProps<typeof WriteTool>): string {
   return ""
 }
 
+function scrollWriteFinal(p: ToolProps<typeof WriteTool>): string {
+  // Return the full output which includes the scan report
+  return text(p.frame.state.output) || ""
+}
+
 function scrollEditStart(_: ToolProps<typeof EditTool>): string {
   return ""
 }
@@ -1056,6 +1061,7 @@ const TOOL_RULES = {
     snap: snapWrite,
     scroll: {
       start: scrollWriteStart,
+      final: scrollWriteFinal,
     },
   },
   edit: {

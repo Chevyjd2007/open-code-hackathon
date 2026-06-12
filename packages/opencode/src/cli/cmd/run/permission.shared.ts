@@ -123,6 +123,14 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
     const blocked = meta.blocked === true
     const status = text(scanResult.status)
     
+    // Import severity display info
+    const severityEmojis: Record<string, string> = {
+      critical: "🔴",
+      high: "🟠",
+      medium: "🟡",
+      low: "🟢",
+    }
+    
     const lines: string[] = []
     
     if (blocked) {
@@ -133,14 +141,43 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
     
     lines.push("")
     
-    if (scanFindings) {
+    // Parse and display findings with severity indicators
+    if (scanResult.findings && Array.isArray(scanResult.findings)) {
+      // Group by severity
+      const bySeverity: Record<string, any[]> = {
+        critical: [],
+        high: [],
+        medium: [],
+        low: [],
+      }
+      
+      scanResult.findings.forEach((f: any) => {
+        if (f.severity && bySeverity[f.severity]) {
+          bySeverity[f.severity].push(f)
+        }
+      })
+      
+      // Display grouped by severity
+      for (const [severity, findings] of Object.entries(bySeverity)) {
+        if (findings.length === 0) continue
+        
+        const emoji = severityEmojis[severity] || "⚪"
+        lines.push(`${emoji} ${severity.toUpperCase()} (${findings.length} issue(s)):`)
+        
+        findings.forEach((f: any) => {
+          lines.push(`  • [${f.scanner}] Line ${f.line || "?"}: ${f.reason}`)
+          if (f.match) lines.push(`    Match: "${f.match}"`)
+        })
+        lines.push("")
+      }
+    } else if (scanFindings) {
       lines.push(...scanFindings.split("\n"))
     }
     
     lines.push("")
     
     if (blocked) {
-      lines.push("This write contains critical security issues and cannot proceed.")
+      lines.push("🛑 This write contains critical security issues and cannot proceed.")
       lines.push("Please fix the issues before attempting to write.")
     } else {
       lines.push("Review the warnings above carefully.")
